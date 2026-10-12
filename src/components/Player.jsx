@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Raycaster, Vector3 } from 'three'
+import { Box3, MathUtils, Raycaster, Vector3 } from 'three'
 import { useAnimations, useGLTF } from '@react-three/drei'
 import { useGame } from '../context/GameContext'
 import useKeyboard from '../hooks/useKeyboard'
@@ -19,16 +19,37 @@ const MODEL_PATHS = {
   fall: '/Mushy%20FALL.glb',
 }
 
+const PLAYER_SCALE = 0.01
+const PLAYER_GROUND_OFFSET = 0
+const GROUND_RAY_HEIGHT = 2
+const MOVE_SPEED = 0.75
+const JUMP_SPEED = 3.54
+const GRAVITY = 18
+const INITIAL_CAMERA_YAW = -0.55
+const INITIAL_PLAYER_ROTATION = Math.PI / 2
+const PLAYER_START_POSITION = [3, 0.05, -3]
+const PLAYER_FORWARD_OFFSET =
+  INITIAL_PLAYER_ROTATION - (INITIAL_CAMERA_YAW + Math.PI)
+
+function alignSceneToGround(scene) {
+  scene.updateMatrixWorld(true)
+  const bounds = new Box3().setFromObject(scene)
+  scene.position.y -= bounds.min.y
+  return scene
+}
+
 // Починаємо вантажити моделі одразу при імпорті, а не при кожному рендері компонента
 Object.values(MODEL_PATHS).forEach((path) => useGLTF.preload(path))
 
 // Головний герой (гриб Муші), тепер з 3D-моделлю і анімаціями.
-const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref) {
+const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMeshes, cameraYawRef }, ref) {
   const keys = useKeyboard()
   const { addFluteNote, status } = useGame()
   const velocityY = useRef(0)
   const isGrounded = useRef(true)
-  const spaceWasPressed = useRef(false)
+  const jumpInProgress = useRef(false)
+  const jumpStartY = useRef(PLAYER_START_POSITION[1])
+  const standingPlatform = useRef(-1)
   const [activeAnimation, setActiveAnimation] = useState('idle')
 
   // Промінь, який летить вниз від гравця і шукає землю в моделі рівня
@@ -50,10 +71,22 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref)
   const jumpRef = useRef(null)
   const fallRef = useRef(null)
 
-  const idleScene = useMemo(() => idleModel.scene.clone(), [idleModel.scene])
-  const walkScene = useMemo(() => walkModel.scene.clone(), [walkModel.scene])
-  const jumpScene = useMemo(() => jumpModel.scene.clone(), [jumpModel.scene])
-  const fallScene = useMemo(() => fallModel.scene.clone(), [fallModel.scene])
+  const idleScene = useMemo(
+    () => alignSceneToGround(idleModel.scene.clone()),
+    [idleModel.scene],
+  )
+  const walkScene = useMemo(
+    () => alignSceneToGround(walkModel.scene.clone()),
+    [walkModel.scene],
+  )
+  const jumpScene = useMemo(
+    () => alignSceneToGround(jumpModel.scene.clone()),
+    [jumpModel.scene],
+  )
+  const fallScene = useMemo(
+    () => alignSceneToGround(fallModel.scene.clone()),
+    [fallModel.scene],
+  )
 
   const { actions: idleActions } = useAnimations(idleModel.animations, idleRef)
   const { actions: walkActions } = useAnimations(walkModel.animations, walkRef)
@@ -98,14 +131,15 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref)
 
   // true, якщо в напрямку (dirX, dirZ) за 0.45 одиниці є стіна (скеля, дерево)
   const isBlocked = (player, dirX, dirZ) => {
-    if (!groundMeshes) return false
+    if (!wallMeshes) return false
 
     // Промінь на рівні "колін": нижчі за 0.5 камінці гравець просто переступає
-    rayOrigin.current.set(player.position.x, player.position.y - 0.4, player.position.z)
+    const collisionY = jumpInProgress.current ? jumpStartY.current : player.position.y
+    rayOrigin.current.set(player.position.x, collisionY - 0.4, player.position.z)
     wallDirection.current.set(dirX, 0, dirZ)
     wallRaycaster.current.set(rayOrigin.current, wallDirection.current)
 
-    const hits = wallRaycaster.current.intersectObjects(groundMeshes, false)
+    const hits = wallRaycaster.current.intersectObjects(wallMeshes, false)
 
     // Ігноруємо майже горизонтальні поверхні (це земля, а не стіна)
     return hits.some((hit) => {
@@ -123,15 +157,26 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref)
     const delta = Math.min(rawDelta, 0.05)
 
     const player = ref.current
-    const moveSpeed = 4
+    const forwardInput = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
+    const strafeInput = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)
+    const cameraYaw = cameraYawRef?.current ?? INITIAL_CAMERA_YAW
+    const forwardX = -Math.sin(cameraYaw)
+    const forwardZ = -Math.cos(cameraYaw)
+    const rightX = Math.cos(cameraYaw)
+    const rightZ = -Math.sin(cameraYaw)
+    let moveX = forwardX * forwardInput + rightX * strafeInput
+    let moveZ = forwardZ * forwardInput + rightZ * strafeInput
+    const moveLength = Math.hypot(moveX, moveZ)
+    const isMoving = moveLength > 0.01
 
-    const moveX = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
-    const moveZ = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)
-    const isMoving = Math.abs(moveX) > 0.01 || Math.abs(moveZ) > 0.01
+    if (isMoving) {
+      moveX /= moveLength
+      moveZ /= moveLength
+    }
 
     // Рухаємось окремо по X і Z, тому біля стіни можна ковзати вздовж неї
-    const stepX = moveX * moveSpeed * delta
-    const stepZ = moveZ * moveSpeed * delta
+    const stepX = moveX * MOVE_SPEED * delta
+    const stepZ = moveZ * MOVE_SPEED * delta
 
     if (stepX !== 0 && !isBlocked(player, Math.sign(stepX), 0)) {
       player.position.x += stepX
@@ -140,54 +185,79 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref)
       player.position.z += stepZ
     }
 
-    velocityY.current -= 18 * delta
+    const facingAngle = cameraYaw + Math.PI + PLAYER_FORWARD_OFFSET
+      ? Math.atan2(moveX, moveZ) + PLAYER_FORWARD_OFFSET
+      : cameraYaw + Math.PI + PLAYER_FORWARD_OFFSET
+    const rotationDifference = MathUtils.euclideanModulo(
+      facingAngle - player.rotation.y + Math.PI,
+      Math.PI * 2,
+    ) - Math.PI
+    player.rotation.y += rotationDifference * Math.min(1, delta * 10)
+
+    const previousY = player.position.y
+    velocityY.current -= GRAVITY * delta
     player.position.y += velocityY.current * delta
 
-    const platformTop = platforms.find((platform) => {
+    const platformIndex = platforms.findIndex((platform, index) => {
       const halfW = platform.size[0] / 2
       const halfD = platform.size[2] / 2
-      const topY = platform.position[1] + platform.size[1] / 2 + 0.5
-
-      return (
+      const topY = platform.position[1] + platform.size[1] / 2 + PLAYER_GROUND_OFFSET
+      const insidePlatform =
         player.position.x >= platform.position[0] - halfW &&
         player.position.x <= platform.position[0] + halfW &&
         player.position.z >= platform.position[2] - halfD &&
-        player.position.z <= platform.position[2] + halfD &&
-        player.position.y >= topY - 0.9 &&
-        player.position.y <= topY + 0.4 &&
+        player.position.z <= platform.position[2] + halfD
+      const landingOnPlatform =
+        jumpInProgress.current &&
+        previousY >= topY &&
+        player.position.y <= topY &&
         velocityY.current <= 0
-      )
+      const stayingOnPlatform =
+        standingPlatform.current === index &&
+        velocityY.current <= 0 &&
+        player.position.y <= topY + 0.1 &&
+        player.position.y >= topY - 0.2
+
+      return insidePlatform && (landingOnPlatform || stayingOnPlatform)
     })
+    const platformTop = platformIndex >= 0 ? platforms[platformIndex] : null
 
     // Шукаємо землю під гравцем: тільки там, де в моделі є меш (порожнеча = падіння)
     let groundY = null
     if (groundMeshes) {
-      rayOrigin.current.set(player.position.x, player.position.y + 0.5, player.position.z)
+      rayOrigin.current.set(player.position.x, player.position.y + GROUND_RAY_HEIGHT, player.position.z)
       raycaster.current.set(rayOrigin.current, rayDown.current)
       const hits = raycaster.current.intersectObjects(groundMeshes, false)
       if (hits.length > 0) {
-        groundY = hits[0].point.y + 1 // 1 — висота центру гравця над землею
+        groundY = hits[0].point.y + PLAYER_GROUND_OFFSET
       }
     }
 
     if (platformTop) {
-      player.position.y = platformTop.position[1] + platformTop.size[1] / 2 + 0.5
+      player.position.y =
+        platformTop.position[1] + platformTop.size[1] / 2 + PLAYER_GROUND_OFFSET
       velocityY.current = 0
       isGrounded.current = true
+      jumpInProgress.current = false
+      standingPlatform.current = platformIndex
     } else if (groundY !== null && player.position.y <= groundY && velocityY.current <= 0) {
       player.position.y = groundY
       velocityY.current = 0
       isGrounded.current = true
+      jumpInProgress.current = false
+      standingPlatform.current = -1
     } else {
       isGrounded.current = false
+      standingPlatform.current = -1
     }
 
-    if (keys.Space && !spaceWasPressed.current && isGrounded.current) {
-      velocityY.current = 7
+    if (keys.Space && isGrounded.current) {
+      velocityY.current = JUMP_SPEED
       isGrounded.current = false
+      jumpInProgress.current = true
+      jumpStartY.current = player.position.y
+      standingPlatform.current = -1
     }
-
-    spaceWasPressed.current = Boolean(keys.Space)
 
     const nextAnimation = !isGrounded.current
       ? velocityY.current > 0
@@ -203,7 +273,12 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes }, ref)
   })
 
   return (
-    <group ref={ref} position={[2.5, 5, -3.5]} scale={[0.05, 0.05, 0.05]} rotation={[0, Math.PI / 2, 0]}>
+    <group
+      ref={ref}
+      position={PLAYER_START_POSITION}
+      scale={[PLAYER_SCALE, PLAYER_SCALE, PLAYER_SCALE]}
+      rotation={[0, INITIAL_PLAYER_ROTATION, 0]}
+    >
       <group ref={idleRef} visible={activeAnimation === 'idle'}>
         <primitive object={idleScene} />
       </group>

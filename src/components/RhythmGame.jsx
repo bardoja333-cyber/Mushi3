@@ -35,6 +35,7 @@ const HIT_WINDOW = 0.25 // на скільки секунд раніше/піз�
 const BOARD_HEIGHT = 440
 const HIT_LINE_Y = 380
 const NOTE_SIZE = 56
+const MIN_HITS_TO_WIN = 5
 
 // Зовнішній компонент: показуємо гру тільки в статусі 'rhythm',
 // тому щоразу вона стартує з чистого стану.
@@ -45,15 +46,20 @@ function RhythmGame() {
 }
 
 function RhythmBoard() {
-  const { setStatus, setEnemiesDefeated, addScore } = useGame()
+  const { setStatus, setEnemiesDefeated, addScore, loseLife, lives } = useGame()
 
   // results[i]: 'wait' | 'hit' | 'miss' для кожної ноти з CHART
   const resultsRef = useRef(START_RESULTS)
+  const livesRef = useRef(lives)
   const nowRef = useRef(-COUNTDOWN)
   const [results, setResults] = useState(START_RESULTS)
   const [now, setNow] = useState(-COUNTDOWN)
   const [pressedLane, setPressedLane] = useState(null)
   const [summary, setSummary] = useState(null)
+
+  useEffect(() => {
+    livesRef.current = lives
+  }, [lives])
 
   const setResult = (index, value) => {
     resultsRef.current = resultsRef.current.map((old, i) => (i === index ? value : old))
@@ -83,13 +89,19 @@ function RhythmBoard() {
         finished = true
 
         const hits = resultsRef.current.filter((r) => r === 'hit').length
-        setSummary({ hits, total: CHART.length })
+        const won = hits >= MIN_HITS_TO_WIN
+        setSummary({ hits, total: CHART.length, won })
 
-        // TODO: (я) сила здібності = hits / total (як у правилах), помилки знімають хп
         addScore(hits * 10)
-        setEnemiesDefeated(true) // вороги в Level1 зникнуть
+        if (won) {
+          setEnemiesDefeated(true)
+        } else {
+          loseLife()
+        }
 
-        closeTimer = window.setTimeout(() => setStatus('playing'), 1800)
+        closeTimer = window.setTimeout(() => {
+          if (won || livesRef.current > 1) setStatus('playing')
+        }, 1800)
         return
       }
 
@@ -101,8 +113,7 @@ function RhythmBoard() {
       cancelAnimationFrame(frameId)
       window.clearTimeout(closeTimer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [addScore, loseLife, setEnemiesDefeated, setStatus])
 
   // Натискання стрілок
   useEffect(() => {
@@ -252,7 +263,9 @@ function RhythmBoard() {
             Влучно: {summary.hits} / {summary.total}
           </div>
           <div>({Math.round((summary.hits / summary.total) * 100)}%)</div>
-          <div style={{ marginTop: 10 }}>Вороги переможені!</div>
+          <div style={{ marginTop: 10 }}>
+            {summary.won ? 'Вороги переможені!' : 'Не вистачило влучань — втрачено життя'}
+          </div>
         </div>
       )}
     </div>

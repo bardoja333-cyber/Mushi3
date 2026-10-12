@@ -12,7 +12,11 @@ function Game() {
 
   return (
     <>
-      <Canvas camera={{ position: [0, 5, 10], fov: 60 }}>
+      <Canvas
+        camera={{ position: [0, 5, 10], fov: 60 }}
+        dpr={[1, 1.25]}
+        gl={{ antialias: false, powerPreference: 'low-power' }}
+      >
         {/* Світло */}
         <ambientLight intensity={0.6} />
         <directionalLight position={[5, 10, 5]} intensity={1} />

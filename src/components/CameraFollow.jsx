@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Vector3 } from 'three'
+import { Raycaster, Vector3 } from 'three'
 
-const MIN_DISTANCE = 3
-const MAX_DISTANCE = 20
+const MIN_DISTANCE = 0.4
+const MAX_DISTANCE = 2.4
+const INITIAL_DISTANCE = 1.6
+const CAMERA_WALL_GAP = 0.2
+const MIN_CAMERA_GAP = 0.25
 
 // Крупний план обличчя Муші (міні-гра). Змінюй числа, щоб підігнати кадр.
 // FACE_OFFSET — де стоїть камера відносно героя, FACE_LOOK_Y — на якій висоті дивиться.
@@ -11,10 +14,11 @@ const FACE_OFFSET = [1, 0.15, 0]
 const FACE_LOOK_Y = 0
 
 // Камера їде за героєм і обертається за ПКМ.
-function CameraFollow({ targetRef, offset = [0, 5, 10], closeUp = false }) {
-  const yaw = useRef(-Math.PI / 4)
-  const pitch = useRef(0.7)
-  const distance = useRef(Math.hypot(offset[0], offset[1], offset[2]))
+function CameraFollow({ targetRef, cameraYawRef, collisionMeshes, closeUp = false }) {
+  const yaw = cameraYawRef
+  const pitch = useRef(0.45)
+  const distance = useRef(INITIAL_DISTANCE)
+  const zoomDistance = useRef(INITIAL_DISTANCE)
   const isRotating = useRef(false)
   const lastPointer = useRef({ x: 0, y: 0 })
 
@@ -24,6 +28,8 @@ function CameraFollow({ targetRef, offset = [0, 5, 10], closeUp = false }) {
   const facePosition = useRef(new Vector3())
   const normalLook = useRef(new Vector3())
   const faceLook = useRef(new Vector3())
+  const cameraRaycaster = useRef(new Raycaster())
+  const cameraDirection = useRef(new Vector3())
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -39,7 +45,7 @@ function CameraFollow({ targetRef, offset = [0, 5, 10], closeUp = false }) {
       const dy = event.clientY - lastPointer.current.y
 
       yaw.current -= dx * 0.005
-      pitch.current = Math.max(-1.2, Math.min(1.2, pitch.current + dy * 0.004))
+      pitch.current = Math.max(0.25, Math.min(1.05, pitch.current + dy * 0.004))
 
       lastPointer.current = { x: event.clientX, y: event.clientY }
     }
@@ -71,23 +77,23 @@ function CameraFollow({ targetRef, offset = [0, 5, 10], closeUp = false }) {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('contextmenu', preventContextMenu)
     }
-  }, [])
+  }, [yaw])
 
   useFrame((state, delta) => {
     const target = targetRef.current
     if (!target) return
 
     blend.current += ((closeUp ? 1 : 0) - blend.current) * Math.min(1, delta * 3)
+    zoomDistance.current += (distance.current - zoomDistance.current) * Math.min(1, delta * 5)
 
     normalPosition.current.set(
       target.position.x +
-        Math.sin(yaw.current) * Math.cos(pitch.current) * distance.current + offset[0] * 0.2,
-      target.position.y +
-        Math.sin(pitch.current) * distance.current + offset[1] * 0.3,
+        Math.sin(yaw.current) * Math.cos(pitch.current) * zoomDistance.current,
+      target.position.y + Math.sin(pitch.current) * zoomDistance.current,
       target.position.z +
-        Math.cos(yaw.current) * Math.cos(pitch.current) * distance.current + offset[2] * 0.2,
+        Math.cos(yaw.current) * Math.cos(pitch.current) * zoomDistance.current,
     )
-    normalLook.current.set(target.position.x, target.position.y + 1.2, target.position.z)
+    normalLook.current.set(target.position.x, target.position.y + 0.09, target.position.z)
 
     facePosition.current.set(
       target.position.x + FACE_OFFSET[0],
@@ -99,6 +105,24 @@ function CameraFollow({ targetRef, offset = [0, 5, 10], closeUp = false }) {
     state.camera.position.lerpVectors(normalPosition.current, facePosition.current, blend.current)
 
     const look = normalLook.current.lerp(faceLook.current, blend.current)
+
+    if (collisionMeshes?.length) {
+      cameraDirection.current.subVectors(state.camera.position, look)
+      const cameraDistance = cameraDirection.current.length()
+
+      if (cameraDistance > MIN_CAMERA_GAP) {
+        cameraDirection.current.normalize()
+        cameraRaycaster.current.set(look, cameraDirection.current)
+        cameraRaycaster.current.far = cameraDistance
+
+        const obstruction = cameraRaycaster.current.intersectObjects(collisionMeshes, false)[0]
+        if (obstruction) {
+          const safeDistance = Math.max(MIN_CAMERA_GAP, obstruction.distance - CAMERA_WALL_GAP)
+          state.camera.position.copy(look).addScaledVector(cameraDirection.current, safeDistance)
+        }
+      }
+    }
+
     state.camera.lookAt(look)
   })
 
