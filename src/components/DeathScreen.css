@@ -1,0 +1,62 @@
+.death-screen {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.death-screen-background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.death-screen-restart {
+  position: absolute;
+  top: 50%;
+  right: 3%;
+  display: grid;
+  width: min(43vw, 520px);
+  max-height: 55vh;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.death-screen-restart img {
+  display: block;
+  width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+
+.death-screen-restart:hover {
+  filter: brightness(1.08);
+  transform: translateY(calc(-50% - 3px));
+}
+
+.death-screen-restart:active {
+  transform: translateY(calc(-50% + 3px));
+}
+
+.death-screen-restart:focus-visible {
+  outline: 3px solid #f5d66f;
+  outline-offset: 4px;
+}
+
+@media (max-width: 700px) {
+  .death-screen-background {
+    object-position: 35% center;
+  }
+
+  .death-screen-restart {
+    right: 1%;
+    width: min(48vw, 340px);
+  }
+}

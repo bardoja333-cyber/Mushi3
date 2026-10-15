@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Box3, MathUtils, Raycaster, Vector3 } from 'three'
+import { useRapier, RigidBody, CapsuleCollider } from '@react-three/rapier'
+import { Box3, MathUtils } from 'three'
 import { useAnimations, useGLTF } from '@react-three/drei'
 import { useGame } from '../context/GameContext'
 import useKeyboard from '../hooks/useKeyboard'
@@ -20,21 +21,34 @@ const MODEL_PATHS = {
 }
 
 const PLAYER_SCALE = 0.01
-const PLAYER_GROUND_OFFSET = 0
-const GROUND_RAY_HEIGHT = 2
-const MOVE_SPEED = 0.75
+const PLAYER_COLLIDER_RADIUS = 0.045
+const PLAYER_COLLIDER_HALF_HEIGHT = 0.005
+const PLAYER_COLLIDER_CENTER_Y = 0.05
+const MOVE_SPEED = 0.701700181875
 const JUMP_SPEED = 3.54
 const GRAVITY = 18
+const CHARACTER_CONTROLLER_OFFSET = 0.002
+const MAX_STEP_HEIGHT = 0.04
+const MIN_STEP_WIDTH = 0.02
+const MAX_SLOPE_CLIMB_ANGLE = Math.PI / 3
+const MIN_SLOPE_SLIDE_ANGLE = Math.PI * 0.45
+const GROUND_SNAP_DISTANCE = 0.08
 const INITIAL_CAMERA_YAW = -0.55
 const INITIAL_PLAYER_ROTATION = Math.PI / 2
 const PLAYER_START_POSITION = [3, 0.05, -3]
 const PLAYER_FORWARD_OFFSET =
-  INITIAL_PLAYER_ROTATION - (INITIAL_CAMERA_YAW + Math.PI)
+  INITIAL_PLAYER_ROTATION - (INITIAL_CAMERA_YAW + Math.PI) + Math.PI / 4
 
 function alignSceneToGround(scene) {
   scene.updateMatrixWorld(true)
   const bounds = new Box3().setFromObject(scene)
   scene.position.y -= bounds.min.y
+  scene.traverse((object) => {
+    if (!object.isMesh) return
+
+    object.castShadow = true
+    object.receiveShadow = true
+  })
   return scene
 }
 
@@ -42,24 +56,90 @@ function alignSceneToGround(scene) {
 Object.values(MODEL_PATHS).forEach((path) => useGLTF.preload(path))
 
 // Головний герой (гриб Муші), тепер з 3D-моделлю і анімаціями.
-const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMeshes, cameraYawRef }, ref) {
+const Player = forwardRef(function Player({
+  cameraYawRef,
+  startPosition = PLAYER_START_POSITION,
+  startRotation = INITIAL_PLAYER_ROTATION,
+  modelScale = PLAYER_SCALE,
+  movementSpeed = MOVE_SPEED,
+  modelOffsetY = 0,
+}, ref) {
   const keys = useKeyboard()
   const { addFluteNote, status } = useGame()
+  const { world } = useRapier()
+  const rigidBodyRef = useRef(null)
+  const colliderRef = useRef(null)
+  const characterControllerRef = useRef(null)
+  const footstepsAudioRef = useRef(null)
+  const jumpAudioRef = useRef(null)
   const velocityY = useRef(0)
   const isGrounded = useRef(true)
-  const jumpInProgress = useRef(false)
-  const jumpStartY = useRef(PLAYER_START_POSITION[1])
-  const standingPlatform = useRef(-1)
   const [activeAnimation, setActiveAnimation] = useState('idle')
 
-  // Промінь, який летить вниз від гравця і шукає землю в моделі рівня
-  const raycaster = useRef(new Raycaster())
-  const rayOrigin = useRef(new Vector3())
-  const rayDown = useRef(new Vector3(0, -1, 0))
+  useEffect(() => {
+    if (status !== 'playing') {
+      velocityY.current = 0
+      setActiveAnimation('idle')
+    }
+  }, [status])
 
-  // Другий промінь — горизонтальний, щоб гравець не проходив крізь скелі та дерева
-  const wallRaycaster = useRef(new Raycaster(undefined, undefined, 0, 0.45))
-  const wallDirection = useRef(new Vector3())
+  useEffect(() => {
+    const characterController = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET)
+    characterController.enableAutostep(MAX_STEP_HEIGHT, MIN_STEP_WIDTH, false)
+    characterController.enableSnapToGround(GROUND_SNAP_DISTANCE)
+    characterController.setMaxSlopeClimbAngle(MAX_SLOPE_CLIMB_ANGLE)
+    characterController.setMinSlopeSlideAngle(MIN_SLOPE_SLIDE_ANGLE)
+    characterControllerRef.current = characterController
+
+    return () => {
+      characterController.free()
+      characterControllerRef.current = null
+    }
+  }, [world])
+
+  useEffect(() => {
+    const footsteps = new Audio('/footsteps-forest.wav')
+    footsteps.loop = true
+    footsteps.volume = 0.16
+    footsteps.preload = 'auto'
+    footstepsAudioRef.current = footsteps
+
+    return () => {
+      footsteps.pause()
+      footsteps.currentTime = 0
+      footstepsAudioRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const jumpSound = new Audio('/jump.mp3')
+    jumpSound.volume = 0.07
+    jumpSound.preload = 'auto'
+    jumpAudioRef.current = jumpSound
+
+    return () => {
+      jumpSound.pause()
+      jumpSound.currentTime = 0
+      jumpAudioRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const footsteps = footstepsAudioRef.current
+    if (!footsteps) return
+
+    if (status === 'playing' && activeAnimation === 'walk') {
+      if (footsteps.paused) {
+        footsteps.play().catch((error) => {
+          console.error('Could not play the footsteps sound:', error)
+        })
+      }
+      return
+    }
+
+    footsteps.pause()
+    footsteps.currentTime = 0
+  }, [activeAnimation, status])
 
   const idleModel = useGLTF(MODEL_PATHS.idle)
   const walkModel = useGLTF(MODEL_PATHS.walk)
@@ -108,10 +188,9 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMe
       fall: fallActions,
     }[activeAnimation]
 
-    const selectedAction = Object.values(selectedMap || {})[0]
-    if (selectedAction) {
-      selectedAction.reset().play()
-    }
+    Object.values(selectedMap || {}).forEach((action) => {
+      action.reset().play()
+    })
   }, [activeAnimation, idleActions, walkActions, jumpActions, fallActions])
 
   useEffect(() => {
@@ -129,34 +208,23 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMe
     return () => window.removeEventListener('keydown', playPressedNote)
   }, [addFluteNote, status])
 
-  // true, якщо в напрямку (dirX, dirZ) за 0.45 одиниці є стіна (скеля, дерево)
-  const isBlocked = (player, dirX, dirZ) => {
-    if (!wallMeshes) return false
-
-    // Промінь на рівні "колін": нижчі за 0.5 камінці гравець просто переступає
-    const collisionY = jumpInProgress.current ? jumpStartY.current : player.position.y
-    rayOrigin.current.set(player.position.x, collisionY - 0.4, player.position.z)
-    wallDirection.current.set(dirX, 0, dirZ)
-    wallRaycaster.current.set(rayOrigin.current, wallDirection.current)
-
-    const hits = wallRaycaster.current.intersectObjects(wallMeshes, false)
-
-    // Ігноруємо майже горизонтальні поверхні (це земля, а не стіна)
-    return hits.some((hit) => {
-      if (!hit.face) return true
-      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
-      return Math.abs(normal.y) < 0.7
-    })
-  }
-
   useFrame((_, rawDelta) => {
-    if (!ref || !ref.current || status !== 'playing') return
+    if (
+      !ref?.current ||
+      !rigidBodyRef.current ||
+      !colliderRef.current ||
+      !characterControllerRef.current ||
+      status !== 'playing'
+    ) return
+
+    if (world.colliders.len() <= 1) return
 
     // Обмежуємо delta: після важкого завантаження перший кадр може тривати секунди,
     // і гравець за один кадр пролетів би крізь землю
     const delta = Math.min(rawDelta, 0.05)
 
     const player = ref.current
+    const bodyPosition = rigidBodyRef.current.translation()
     const forwardInput = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
     const strafeInput = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)
     const cameraYaw = cameraYawRef?.current ?? INITIAL_CAMERA_YAW
@@ -174,18 +242,10 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMe
       moveZ /= moveLength
     }
 
-    // Рухаємось окремо по X і Z, тому біля стіни можна ковзати вздовж неї
-    const stepX = moveX * MOVE_SPEED * delta
-    const stepZ = moveZ * MOVE_SPEED * delta
+    const stepX = moveX * movementSpeed * delta
+    const stepZ = moveZ * movementSpeed * delta
 
-    if (stepX !== 0 && !isBlocked(player, Math.sign(stepX), 0)) {
-      player.position.x += stepX
-    }
-    if (stepZ !== 0 && !isBlocked(player, 0, Math.sign(stepZ))) {
-      player.position.z += stepZ
-    }
-
-    const facingAngle = cameraYaw + Math.PI + PLAYER_FORWARD_OFFSET
+    const facingAngle = isMoving
       ? Math.atan2(moveX, moveZ) + PLAYER_FORWARD_OFFSET
       : cameraYaw + Math.PI + PLAYER_FORWARD_OFFSET
     const rotationDifference = MathUtils.euclideanModulo(
@@ -194,70 +254,33 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMe
     ) - Math.PI
     player.rotation.y += rotationDifference * Math.min(1, delta * 10)
 
-    const previousY = player.position.y
-    velocityY.current -= GRAVITY * delta
-    player.position.y += velocityY.current * delta
-
-    const platformIndex = platforms.findIndex((platform, index) => {
-      const halfW = platform.size[0] / 2
-      const halfD = platform.size[2] / 2
-      const topY = platform.position[1] + platform.size[1] / 2 + PLAYER_GROUND_OFFSET
-      const insidePlatform =
-        player.position.x >= platform.position[0] - halfW &&
-        player.position.x <= platform.position[0] + halfW &&
-        player.position.z >= platform.position[2] - halfD &&
-        player.position.z <= platform.position[2] + halfD
-      const landingOnPlatform =
-        jumpInProgress.current &&
-        previousY >= topY &&
-        player.position.y <= topY &&
-        velocityY.current <= 0
-      const stayingOnPlatform =
-        standingPlatform.current === index &&
-        velocityY.current <= 0 &&
-        player.position.y <= topY + 0.1 &&
-        player.position.y >= topY - 0.2
-
-      return insidePlatform && (landingOnPlatform || stayingOnPlatform)
-    })
-    const platformTop = platformIndex >= 0 ? platforms[platformIndex] : null
-
-    // Шукаємо землю під гравцем: тільки там, де в моделі є меш (порожнеча = падіння)
-    let groundY = null
-    if (groundMeshes) {
-      rayOrigin.current.set(player.position.x, player.position.y + GROUND_RAY_HEIGHT, player.position.z)
-      raycaster.current.set(rayOrigin.current, rayDown.current)
-      const hits = raycaster.current.intersectObjects(groundMeshes, false)
-      if (hits.length > 0) {
-        groundY = hits[0].point.y + PLAYER_GROUND_OFFSET
-      }
-    }
-
-    if (platformTop) {
-      player.position.y =
-        platformTop.position[1] + platformTop.size[1] / 2 + PLAYER_GROUND_OFFSET
-      velocityY.current = 0
-      isGrounded.current = true
-      jumpInProgress.current = false
-      standingPlatform.current = platformIndex
-    } else if (groundY !== null && player.position.y <= groundY && velocityY.current <= 0) {
-      player.position.y = groundY
-      velocityY.current = 0
-      isGrounded.current = true
-      jumpInProgress.current = false
-      standingPlatform.current = -1
-    } else {
-      isGrounded.current = false
-      standingPlatform.current = -1
-    }
-
     if (keys.Space && isGrounded.current) {
       velocityY.current = JUMP_SPEED
       isGrounded.current = false
-      jumpInProgress.current = true
-      jumpStartY.current = player.position.y
-      standingPlatform.current = -1
+      const jumpSound = jumpAudioRef.current
+      if (jumpSound) {
+        jumpSound.currentTime = 0
+        jumpSound.play().catch((error) => {
+          console.error('Could not play the jump sound:', error)
+        })
+      }
     }
+
+    velocityY.current -= GRAVITY * delta
+    const characterController = characterControllerRef.current
+    characterController.computeColliderMovement(colliderRef.current, {
+      x: stepX,
+      y: velocityY.current * delta,
+      z: stepZ,
+    })
+    const movement = characterController.computedMovement()
+    rigidBodyRef.current.setNextKinematicTranslation({
+      x: bodyPosition.x + movement.x,
+      y: bodyPosition.y + movement.y,
+      z: bodyPosition.z + movement.z,
+    })
+    isGrounded.current = characterController.computedGrounded()
+    if (isGrounded.current && velocityY.current < 0) velocityY.current = 0
 
     const nextAnimation = !isGrounded.current
       ? velocityY.current > 0
@@ -273,25 +296,37 @@ const Player = forwardRef(function Player({ platforms = [], groundMeshes, wallMe
   })
 
   return (
-    <group
-      ref={ref}
-      position={PLAYER_START_POSITION}
-      scale={[PLAYER_SCALE, PLAYER_SCALE, PLAYER_SCALE]}
-      rotation={[0, INITIAL_PLAYER_ROTATION, 0]}
+    <RigidBody
+      ref={rigidBodyRef}
+      type="kinematicPosition"
+      position={startPosition}
+      colliders={false}
     >
-      <group ref={idleRef} visible={activeAnimation === 'idle'}>
-        <primitive object={idleScene} />
+      <CapsuleCollider
+        ref={colliderRef}
+        args={[PLAYER_COLLIDER_HALF_HEIGHT, PLAYER_COLLIDER_RADIUS]}
+        position={[0, PLAYER_COLLIDER_CENTER_Y, 0]}
+      />
+      <group
+        ref={ref}
+        position={[0, modelOffsetY, 0]}
+        scale={[modelScale, modelScale, modelScale]}
+        rotation={[0, startRotation, 0]}
+      >
+        <group ref={idleRef} visible={activeAnimation === 'idle'}>
+          <primitive object={idleScene} />
+        </group>
+        <group ref={walkRef} visible={activeAnimation === 'walk'}>
+          <primitive object={walkScene} />
+        </group>
+        <group ref={jumpRef} visible={activeAnimation === 'jump'}>
+          <primitive object={jumpScene} />
+        </group>
+        <group ref={fallRef} visible={activeAnimation === 'fall'}>
+          <primitive object={fallScene} />
+        </group>
       </group>
-      <group ref={walkRef} visible={activeAnimation === 'walk'}>
-        <primitive object={walkScene} />
-      </group>
-      <group ref={jumpRef} visible={activeAnimation === 'jump'}>
-        <primitive object={jumpScene} />
-      </group>
-      <group ref={fallRef} visible={activeAnimation === 'fall'}>
-        <primitive object={fallScene} />
-      </group>
-    </group>
+    </RigidBody>
   )
 })
 

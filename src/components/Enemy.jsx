@@ -5,7 +5,7 @@ import { useGame } from '../context/GameContext'
 // Ворог рухається по ділянці і перемагається правильною мелодією.
 // TODO: (я) додати складніші мелодії, пошкодження за помилки і різні типи ворогів
 function Enemy({ position = [3, 1, 0], melody = ['do', 're', 'mi'], playerRef, onDefeat }) {
-  const { fluteNotes, loseLife, status } = useGame()
+  const { fluteNotes, loseLife, status, currentLevel } = useGame()
   const meshRef = useRef(null)
   const basePosition = useRef([...position])
   // Випадкове зміщення рахуємо один раз (useState із функцією), а не при кожному рендері
@@ -44,7 +44,7 @@ function Enemy({ position = [3, 1, 0], melody = ['do', 're', 'mi'], playerRef, o
 
       cooldown.current -= delta
       if (cooldown.current <= 0) {
-        loseLife()
+        loseLife(currentLevel === 2 ? 'fight-level-2' : 'fight-level-1')
         cooldown.current = 1.2
       }
     }

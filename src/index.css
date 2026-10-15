@@ -19,3 +19,39 @@ canvas {
 canvas:active {
   cursor: grabbing;
 }
+
+.level-tutorial {
+  position: fixed;
+  z-index: 9000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: tutorial-intro 2.8s ease-in-out both;
+}
+
+.rhythm-tutorial {
+  animation-duration: 4s;
+}
+
+.level-tutorial img {
+  display: block;
+  width: min(42vw, 440px);
+  max-height: 55vh;
+  object-fit: contain;
+}
+
+@keyframes tutorial-intro {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

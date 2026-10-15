@@ -1,115 +1,231 @@
 .lobby {
   position: fixed;
   inset: 0;
-  display: grid;
-  place-items: center;
-  overflow: auto;
-  padding: 24px;
-  background:
-    radial-gradient(ellipse at 50% 100%, rgba(81, 133, 54, 0.5), transparent 55%),
-    linear-gradient(160deg, #14251c, #243b27 55%, #101b16);
-  color: #fff7df;
-  font-family: "Bitcount Ink", system-ui;
+  overflow: hidden;
+  background: #14283a;
+  color: #f7f3e9;
+  font-family: "Bitcount Ink", system-ui, sans-serif;
 }
 
-.lobby-panel {
-  display: flex;
-  width: min(100%, 620px);
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  padding: 38px 28px;
-  border: 2px solid rgba(255, 247, 223, 0.45);
-  border-radius: 24px;
-  background: rgba(12, 24, 17, 0.78);
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.45);
-  text-align: center;
+.lobby,
+.lobby * {
+  box-sizing: border-box;
 }
 
-.lobby-title {
-  font-size: clamp(48px, 10vw, 84px);
-  letter-spacing: 0.08em;
-  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.65);
-}
-
-.lobby-subtitle,
-.lobby-message {
-  font-size: clamp(18px, 4vw, 24px);
-}
-
-.lobby-menu {
-  display: flex;
+.lobby-background-video,
+.lobby-video-shade {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  margin-top: 10px;
+  height: 100%;
 }
 
-.lobby-image-button {
+.lobby-background-video {
+  object-fit: cover;
+  object-position: center;
+}
+
+.lobby-video-shade {
+  background: linear-gradient(
+    90deg,
+    rgba(11, 27, 43, 0.05) 35%,
+    rgba(11, 27, 43, 0.24) 64%,
+    rgba(11, 27, 43, 0.52) 100%
+  );
+  pointer-events: none;
+}
+
+.lobby-credits-image {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
   display: grid;
-  width: min(100%, 300px);
-  min-height: 80px;
+  width: 100%;
+  height: 100%;
   place-items: center;
   padding: 0;
   border: 0;
-  background: transparent;
+  background: #fff;
   cursor: pointer;
-  transition: transform 140ms ease, filter 140ms ease;
-  color: white;
-  gap: 20px;
-  font-family: "Bitcount Ink", system-ui;
-  font-size: 30px;
 }
 
-.lobby-image-button:hover {
-  filter: brightness(1.12);
-  transform: scale(1.04);
-}
-
-.lobby-image-button:focus-visible,
-.lobby-text-button:focus-visible {
-  outline: 3px solid #fff7df;
-  outline-offset: 5px;
-}
-
-.lobby-image-button img {
+.lobby-credits-image img {
   display: block;
   width: 100%;
-  max-height: 100px;
+  height: 100%;
   object-fit: contain;
 }
 
-.lobby-small-button {
-  width: min(100%, 220px);
-  min-height: 58px;
+.lobby-credits-image:focus-visible {
+  outline: 4px solid #f5d66f;
+  outline-offset: -8px;
 }
 
-.lobby-text-button {
-  padding: 12px 20px;
-  border: 1px solid rgba(255, 247, 223, 0.7);
-  border-radius: 10px;
-  background: #315b38;
-  color: inherit;
-  font: inherit;
-  font-size: 18px;
+.lobby-intro-cover {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+}
+
+.lobby-intro-cover--revealing {
+  animation: reveal-lobby 1.5s ease-out forwards;
+}
+
+@keyframes reveal-lobby {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.lobby-screen {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 33vw, 420px);
+  align-items: center;
+  gap: 48px;
+  padding: 56px 7vw;
+}
+
+.lobby-title {
+  margin: 0;
+  font-size: 64px;
+  line-height: 1;
+  text-shadow: 0 4px 18px rgba(8, 20, 32, 0.8);
+}
+
+.lobby-message {
+  margin: 16px 0 0;
+  font-size: 22px;
+  text-shadow: 0 2px 10px rgba(8, 20, 32, 0.9);
+}
+
+.lobby-menu {
+  position: relative;
+  left: 24px;
+  grid-column: 2;
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 22px;
+}
+
+.lobby-action-button {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
   cursor: pointer;
+  font-size: 0;
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
 }
 
-.lobby-text-button:hover {
-  background: #427849;
+.lobby-action-button img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(22vh, 190px);
+  object-fit: contain;
 }
-.lobby-button-text{
-  font-family: "Bitcount Ink", system-ui;
+
+.lobby-action-button:hover {
+  filter: brightness(1.08);
+  transform: translateY(-3px);
+}
+
+.lobby-action-button:active {
+  transform: translateY(4px);
+}
+
+.lobby-action-button:focus-visible {
+  outline: 3px solid #f5d66f;
+  outline-offset: 5px;
+}
+
+.lobby-message-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 32px;
+  text-align: center;
+}
+
+.lobby-message-panel .lobby-action-button {
+  width: min(100%, 340px);
+}
+
+.lobby-button-back {
+  min-height: 58px;
+  padding: 12px 20px;
+  border: 1px solid rgba(247, 243, 233, 0.8);
+  border-radius: 8px;
+  background: #142d45;
+  box-shadow: none;
+  color: #f7f3e9;
   font-size: 20px;
 }
 
-@media (max-width: 480px) {
-  .lobby {
-    padding: 14px;
+.lobby-button-back:hover {
+  background: #203f5c;
+}
+
+@media (max-width: 700px) {
+  .lobby-screen {
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 28px;
+    padding: 32px 24px;
   }
 
-  .lobby-panel {
-    padding: 28px 18px;
+  .lobby-title {
+    font-size: 48px;
+  }
+
+  .lobby-message {
+    font-size: 18px;
+  }
+
+  .lobby-menu {
+    left: 0;
+    grid-column: 1;
+    width: min(100%, 360px);
+    justify-self: end;
+    gap: 14px;
+  }
+
+  .lobby-action-button {
+    min-height: 0;
+  }
+
+  .lobby-action-button img {
+    max-height: 20vh;
+  }
+
+  .lobby-video-shade {
+    background: linear-gradient(
+      180deg,
+      rgba(11, 27, 43, 0.12) 20%,
+      rgba(11, 27, 43, 0.1) 48%,
+      rgba(11, 27, 43, 0.58) 100%
+    );
   }
 }

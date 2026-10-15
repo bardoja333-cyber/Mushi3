@@ -4,7 +4,7 @@ import { Raycaster, Vector3 } from 'three'
 
 const MIN_DISTANCE = 0.4
 const MAX_DISTANCE = 2.4
-const INITIAL_DISTANCE = 1.6
+const INITIAL_DISTANCE = 1.2
 const CAMERA_WALL_GAP = 0.2
 const MIN_CAMERA_GAP = 0.25
 
@@ -14,9 +14,17 @@ const FACE_OFFSET = [1, 0.15, 0]
 const FACE_LOOK_Y = 0
 
 // Камера їде за героєм і обертається за ПКМ.
-function CameraFollow({ targetRef, cameraYawRef, collisionMeshes, closeUp = false }) {
+function CameraFollow({
+  targetRef,
+  cameraYawRef,
+  collisionMeshes,
+  closeUp = false,
+  combatView = false,
+  minimumTargetY = -Infinity,
+  initialPitch = 0.45,
+}) {
   const yaw = cameraYawRef
-  const pitch = useRef(0.45)
+  const pitch = useRef(initialPitch)
   const distance = useRef(INITIAL_DISTANCE)
   const zoomDistance = useRef(INITIAL_DISTANCE)
   const isRotating = useRef(false)
@@ -28,6 +36,7 @@ function CameraFollow({ targetRef, cameraYawRef, collisionMeshes, closeUp = fals
   const facePosition = useRef(new Vector3())
   const normalLook = useRef(new Vector3())
   const faceLook = useRef(new Vector3())
+  const targetWorldPosition = useRef(new Vector3())
   const cameraRaycaster = useRef(new Raycaster())
   const cameraDirection = useRef(new Vector3())
 
@@ -82,25 +91,33 @@ function CameraFollow({ targetRef, cameraYawRef, collisionMeshes, closeUp = fals
   useFrame((state, delta) => {
     const target = targetRef.current
     if (!target) return
+    const targetPosition = target.getWorldPosition(targetWorldPosition.current)
+    const cameraTargetY = Math.max(targetPosition.y, minimumTargetY)
+    const cameraDistance = combatView
+      ? Math.max(MIN_DISTANCE, zoomDistance.current * 0.65)
+      : zoomDistance.current
 
     blend.current += ((closeUp ? 1 : 0) - blend.current) * Math.min(1, delta * 3)
     zoomDistance.current += (distance.current - zoomDistance.current) * Math.min(1, delta * 5)
+    const combatSideOffset = combatView ? 0.45 : 0
 
     normalPosition.current.set(
-      target.position.x +
-        Math.sin(yaw.current) * Math.cos(pitch.current) * zoomDistance.current,
-      target.position.y + Math.sin(pitch.current) * zoomDistance.current,
-      target.position.z +
-        Math.cos(yaw.current) * Math.cos(pitch.current) * zoomDistance.current,
+      targetPosition.x +
+        Math.sin(yaw.current) * Math.cos(pitch.current) * cameraDistance +
+        Math.cos(yaw.current) * combatSideOffset,
+      cameraTargetY + Math.sin(pitch.current) * cameraDistance,
+      targetPosition.z +
+        Math.cos(yaw.current) * Math.cos(pitch.current) * cameraDistance -
+        Math.sin(yaw.current) * combatSideOffset,
     )
-    normalLook.current.set(target.position.x, target.position.y + 0.09, target.position.z)
+    normalLook.current.set(targetPosition.x, cameraTargetY + 0.09, targetPosition.z)
 
     facePosition.current.set(
-      target.position.x + FACE_OFFSET[0],
-      target.position.y + FACE_OFFSET[1],
-      target.position.z + FACE_OFFSET[2],
+      targetPosition.x + FACE_OFFSET[0],
+      cameraTargetY + FACE_OFFSET[1],
+      targetPosition.z + FACE_OFFSET[2],
     )
-    faceLook.current.set(target.position.x, target.position.y + FACE_LOOK_Y, target.position.z)
+    faceLook.current.set(targetPosition.x, cameraTargetY + FACE_LOOK_Y, targetPosition.z)
 
     state.camera.position.lerpVectors(normalPosition.current, facePosition.current, blend.current)
 
